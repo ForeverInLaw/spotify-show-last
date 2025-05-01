@@ -109,7 +109,7 @@ async function getAccessToken() {
 app.get('/api/now-playing', async (req, res) => {
     try {
         const accessToken = await getAccessToken();
-        const response = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+        const response = await fetch('https://api.spotify.com/v1/me/player/now-playing', {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
