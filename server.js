@@ -20,7 +20,7 @@ app.use(cors({ origin: frontendUri }));
 // --- Шаг 1: Получение Refresh Token (нужно сделать один раз вручную) ---
 // Эндпоинт для старта авторизации (перейдите сюда в браузере ОДИН РАЗ)
 app.get('/login', (req, res) => {
-    const scope = 'user-read-currently-playing'; // Права доступа
+    const scope = 'user-read-currently-playing user-read-recently-played';
     res.redirect('https://accounts.spotify.com/authorize?' +
         querystring.stringify({
             response_type: 'code',
@@ -110,40 +110,68 @@ async function getAccessToken() {
 app.get('/api/now-playing', async (req, res) => {
     try {
         const accessToken = await getAccessToken();
-        const response = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+
+        // 1. Проверяем текущий трек
+        const currentResponse = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
-        // Spotify возвращает 204 No Content, если ничего не играет
-        if (response.status === 204 || response.status > 400) {
-            return res.json({ isPlaying: false });
+        if (currentResponse.status === 200) {
+            const song = await currentResponse.json();
+            if (song && song.item && song.is_playing) {
+                // Если что-то играет СЕЙЧАС, возвращаем это
+                console.log("Сейчас играет:", song.item.name);
+                const trackData = {
+                    isPlaying: true, // Флаг, что трек играет прямо сейчас
+                    title: song.item.name,
+                    artist: song.item.artists.map(artist => artist.name).join(', '),
+                    albumImageUrl: song.item.album.images[0]?.url,
+                    songUrl: song.item.external_urls.spotify,
+                    trackId: song.item.id
+                };
+                return res.json(trackData);
+            }
+        } else if (currentResponse.status !== 204) {
+            // Если не 200 и не 204 (нет контента), значит была ошибка
+             console.error("Ошибка при запросе currently-playing:", currentResponse.status, await currentResponse.text());
+             // Можно сразу вернуть ошибку, или попробовать получить недавний трек
         }
 
-        const song = await response.json();
+        // 2. Если ничего не играет СЕЙЧАС, запрашиваем последний проигранный
+        console.log("Ничего не играет, запрашиваем недавние треки...");
+        const recentResponse = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=1', {
+             headers: { 'Authorization': 'Bearer ' + accessToken }
+        });
 
-         // Проверяем, что ответ содержит ожидаемые данные и item не null
-        if (!song || !song.item) {
-            return res.json({ isPlaying: false });
+        if (recentResponse.status === 200) {
+            const recentData = await recentResponse.json();
+            if (recentData && recentData.items && recentData.items.length > 0) {
+                const lastTrack = recentData.items[0].track;
+                console.log("Последний трек:", lastTrack.name);
+                const trackData = {
+                    isPlaying: false, // Флаг, что трек НЕ играет сейчас (это последний)
+                    title: lastTrack.name,
+                    artist: lastTrack.artists.map(artist => artist.name).join(', '),
+                    albumImageUrl: lastTrack.album.images[0]?.url,
+                    songUrl: lastTrack.external_urls.spotify,
+                    trackId: lastTrack.id
+                };
+                return res.json(trackData);
+            }
+        } else {
+             console.error("Ошибка при запросе recently-played:", recentResponse.status, await recentResponse.text());
         }
 
-        const trackData = {
-            isPlaying: song.is_playing,
-            title: song.item.name,
-            artist: song.item.artists.map(artist => artist.name).join(', '),
-            albumImageUrl: song.item.album.images[0]?.url, // Берем самую большую обложку
-            songUrl: song.item.external_urls.spotify,
-            previewUrl: song.item.preview_url, // URL для 30-секундного превью
-            trackId: song.item.id // ID трека для embed-виджета
-        };
-        res.json(trackData);
+        // 3. Если не нашли ни текущий, ни последний трек
+        console.log("Не найдено ни текущих, ни недавних треков.");
+        return res.json({ isPlaying: false }); // Отправляем isPlaying: false, фронтенд покажет "ничего не играет"
 
     } catch (error) {
         console.error("Ошибка в /api/now-playing:", error);
-        // Отправляем информацию об ошибке на фронтенд (опционально)
-        // или просто статус, что что-то пошло не так
         res.status(500).json({ isPlaying: false, error: error.message || "Ошибка получения данных из Spotify" });
     }
 });
+
 
 app.listen(port, () => {
     console.log(`Сервер запущен на порту ${port}`);
