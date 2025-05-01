@@ -12,6 +12,7 @@ const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
 let refreshToken = process.env.SPOTIFY_REFRESH_TOKEN; // Будет обновляться
 const frontendUri = process.env.FRONTEND_URI;
+console.log("CORS Middleware: Разрешенный origin (frontendUri):", frontendUri);
 
 // Разрешаем запросы с вашего сайта на GitHub Pages
 app.use(cors({ origin: frontendUri }));
@@ -109,7 +110,7 @@ async function getAccessToken() {
 app.get('/api/now-playing', async (req, res) => {
     try {
         const accessToken = await getAccessToken();
-        const response = await fetch('https://api.spotify.com/v1/me/player/now-playing', {
+        const response = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
             headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
