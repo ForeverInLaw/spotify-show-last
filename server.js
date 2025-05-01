@@ -139,14 +139,17 @@ app.get('/api/now-playing', async (req, res) => {
 
         // 2. Если ничего не играет СЕЙЧАС, запрашиваем последний проигранный
         console.log("Ничего не играет, запрашиваем недавние треки...");
-        const recentResponse = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=1', {
+        const recentResponse = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=5', {
              headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
         if (recentResponse.status === 200) {
             const recentData = await recentResponse.json();
             if (recentData && recentData.items && recentData.items.length > 0) {
+                console.log("Недавние треки (до 5):", recentData.items.map(item => item.track.name));
+
                 const lastTrack = recentData.items[0].track;
+                
                 console.log("Последний трек:", lastTrack.name);
                 const trackData = {
                     isPlaying: false, // Флаг, что трек НЕ играет сейчас (это последний)
