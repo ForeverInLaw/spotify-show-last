@@ -11,11 +11,26 @@ const clientId = process.env.SPOTIFY_CLIENT_ID;
 const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
 let refreshToken = process.env.SPOTIFY_REFRESH_TOKEN; // Будет обновляться
-const frontendUri = process.env.FRONTEND_URI;
-console.log("CORS Middleware: Разрешенный origin (frontendUri):", frontendUri);
+const frontendUri = process.env.FRONTEND_URI || "";
+// Разбиваем строку по запятой и удаляем лишние пробелы, создавая массив
+const allowedOrigins = frontendUri.split(',').map(url => url.trim());
 
-// Разрешаем запросы с вашего сайта на GitHub Pages
-app.use(cors({ origin: frontendUri }));
+console.log("CORS Middleware: Разрешенные домены:", allowedOrigins);
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Разрешаем запросы без origin (например, server-to-server или curl)
+        if (!origin) return callback(null, true);
+        
+        // Проверяем, есть ли origin в нашем списке разрешенных
+        if (allowedOrigins.indexOf(origin) === -1) {
+            var msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    }
+}));
+
 
 // --- Шаг 1: Получение Refresh Token (нужно сделать один раз вручную) ---
 // Эндпоинт для старта авторизации (перейдите сюда в браузере ОДИН РАЗ)
@@ -184,4 +199,5 @@ app.listen(port, () => {
      if (!frontendUri) {
         console.warn("!!! FRONTEND_URI не установлен в .env. CORS может не работать.");
     }
+
 });
