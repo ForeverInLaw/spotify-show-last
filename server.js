@@ -21,7 +21,7 @@ app.use(cors({
     origin: function (origin, callback) {
         // Разрешаем запросы без origin (например, server-to-server или curl)
         if (!origin) return callback(null, true);
-        
+
         // Проверяем, есть ли origin в нашем списке разрешенных
         if (allowedOrigins.indexOf(origin) === -1) {
             var msg = 'The CORS policy for this site does not allow access from the specified Origin.';
@@ -35,7 +35,7 @@ app.use(cors({
 // --- Шаг 1: Получение Refresh Token (нужно сделать один раз вручную) ---
 // Эндпоинт для старта авторизации (перейдите сюда в браузере ОДИН РАЗ)
 app.get('/login', (req, res) => {
-    const scope = 'user-read-currently-playing user-read-recently-played';
+    const scope = 'user-read-currently-playing user-read-recently-played playlist-read-private';
     res.redirect('https://accounts.spotify.com/authorize?' +
         querystring.stringify({
             response_type: 'code',
@@ -104,11 +104,11 @@ async function getAccessToken() {
         const response = await fetch('https://accounts.spotify.com/api/token', authOptions);
         const data = await response.json();
         if (!response.ok) {
-             // Если refresh token невалиден, возможно, нужно снова пройти /login
-             console.error("Ошибка обновления токена:", data);
-             throw new Error(data.error_description || "Не удалось обновить токен");
+            // Если refresh token невалиден, возможно, нужно снова пройти /login
+            console.error("Ошибка обновления токена:", data);
+            throw new Error(data.error_description || "Не удалось обновить токен");
         }
-         // Spotify может вернуть новый refresh token, но не всегда. Обычно старый продолжает работать.
+        // Spotify может вернуть новый refresh token, но не всегда. Обычно старый продолжает работать.
         // if (data.refresh_token) {
         //     refreshToken = data.refresh_token;
         //     // TODO: Обновить сохраненный refresh token (в переменных окружения Heroku)
@@ -148,14 +148,14 @@ app.get('/api/now-playing', async (req, res) => {
             }
         } else if (currentResponse.status !== 204) {
             // Если не 200 и не 204 (нет контента), значит была ошибка
-             console.error("Ошибка при запросе currently-playing:", currentResponse.status, await currentResponse.text());
-             // Можно сразу вернуть ошибку, или попробовать получить недавний трек
+            console.error("Ошибка при запросе currently-playing:", currentResponse.status, await currentResponse.text());
+            // Можно сразу вернуть ошибку, или попробовать получить недавний трек
         }
 
         // 2. Если ничего не играет СЕЙЧАС, запрашиваем последний проигранный
         console.log("Ничего не играет, запрашиваем недавние треки...");
         const recentResponse = await fetch('https://api.spotify.com/v1/me/player/recently-played?limit=5', {
-             headers: { 'Authorization': 'Bearer ' + accessToken }
+            headers: { 'Authorization': 'Bearer ' + accessToken }
         });
 
         if (recentResponse.status === 200) {
@@ -164,7 +164,7 @@ app.get('/api/now-playing', async (req, res) => {
                 console.log("Недавние треки (до 5):", recentData.items.map(item => item.track.name));
 
                 const lastTrack = recentData.items[0].track;
-                
+
                 console.log("Последний трек:", lastTrack.name);
                 const trackData = {
                     isPlaying: false, // Флаг, что трек НЕ играет сейчас (это последний)
@@ -177,16 +177,82 @@ app.get('/api/now-playing', async (req, res) => {
                 return res.json(trackData);
             }
         } else {
-             console.error("Ошибка при запросе recently-played:", recentResponse.status, await recentResponse.text());
+            console.error("Ошибка при запросе recently-played:", recentResponse.status, await recentResponse.text());
         }
 
         // 3. Если не нашли ни текущий, ни последний трек
         console.log("Не найдено ни текущих, ни недавних треков.");
         return res.json({ isPlaying: false }); // Отправляем isPlaying: false, фронтенд покажет "ничего не играет"
-
     } catch (error) {
         console.error("Ошибка в /api/now-playing:", error);
         res.status(500).json({ isPlaying: false, error: error.message || "Ошибка получения данных из Spotify" });
+    }
+});
+
+// --- Кэширование плейлистов ---
+let playlistsCache = null;
+let lastCacheTime = 0;
+const CACHE_DURATION = 60 * 60 * 1000; // 1 час
+
+const CURATED_PLAYLIST_IDS = [
+    '0Ne5hkctsl5Iw7qelG880O', // wave/hardwave
+    '1rJx32q5gJBlErYiNY4MEW', // dissociation in sorrow
+    '2hiCOKHVrOR6C3DlZu8YSR', // energetic dnb
+    '4CdR4U4H0mNVN71laSoK02', // witch house
+    '0BSI9m9B0hXR4MZyIM8El3'  // breakcore
+];
+
+app.get('/api/playlists', async (req, res) => {
+    try {
+        // Проверка кэша
+        if (playlistsCache && (Date.now() - lastCacheTime < CACHE_DURATION)) {
+            console.log("Отдача плейлистов из кэша");
+            return res.json(playlistsCache);
+        }
+
+        console.log("Запрос плейлистов из Spotify API...");
+        const accessToken = await getAccessToken();
+
+        const playlistPromises = CURATED_PLAYLIST_IDS.map(async (id) => {
+            try {
+                const response = await fetch(`https://api.spotify.com/v1/playlists/${id}`, {
+                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                });
+
+                if (!response.ok) {
+                    console.error(`Не удалось получить плейлист ${id}: ${response.status}`);
+                    return null;
+                }
+
+                const data = await response.json();
+                return {
+                    id: data.id,
+                    name: data.name,
+                    description: data.description,
+                    url: data.external_urls.spotify,
+                    image: data.images[0]?.url,
+                    tracks: data.tracks.total,
+                    owner: data.owner.display_name
+                };
+            } catch (err) {
+                console.error(`Ошибка получения плейлиста ${id}:`, err);
+                return null;
+            }
+        });
+
+        const playlists = (await Promise.all(playlistPromises)).filter(p => p !== null);
+
+        if (playlists.length > 0) {
+            playlistsCache = playlists;
+            lastCacheTime = Date.now();
+            res.json(playlists);
+        } else {
+            res.status(500).json({ error: "Не удалось получить ни одного плейлиста" });
+        }
+
+    } catch (error) {
+        console.error("Ошибка в /api/playlists:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -196,7 +262,7 @@ app.listen(port, () => {
     if (!refreshToken) {
         console.warn("!!! Refresh Token не найден. Перейдите на /login в браузере, чтобы авторизоваться.");
     }
-     if (!frontendUri) {
+    if (!frontendUri) {
         console.warn("!!! FRONTEND_URI не установлен в .env. CORS может не работать.");
     }
 
