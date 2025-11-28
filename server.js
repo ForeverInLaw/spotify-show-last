@@ -12,22 +12,36 @@ const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
 let refreshToken = process.env.SPOTIFY_REFRESH_TOKEN; // Будет обновляться
 const frontendUri = process.env.FRONTEND_URI || "";
-// Разбиваем строку по запятой и удаляем лишние пробелы, создавая массив
-const allowedOrigins = frontendUri.split(',').map(url => url.trim());
+// Разбиваем строку по запятой, удаляем лишние пробелы и пустые значения
+const allowedOrigins = frontendUri
+    .split(',')
+    .map(url => url.trim())
+    .filter(url => url.length > 0);
+const allowAllOrigins = allowedOrigins.length === 0;
 
 console.log("CORS Middleware: Разрешенные домены:", allowedOrigins);
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Разрешаем запросы без origin (например, server-to-server или curl)
-        if (!origin) return callback(null, true);
+        // Разрешаем запросы без origin или из file:// (origin === 'null')
+        if (!origin || origin === 'null') {
+            return callback(null, true);
+        }
+
+        // Если список пуст — разрешаем все домены и логируем предупреждение один раз
+        if (allowAllOrigins) {
+            console.warn('FRONTEND_URI не задан: CORS разрешает все домены.');
+            return callback(null, true);
+        }
 
         // Проверяем, есть ли origin в нашем списке разрешенных
-        if (allowedOrigins.indexOf(origin) === -1) {
-            var msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            return callback(null, true);
         }
-        return callback(null, true);
+
+        const msg = `CORS блокирует запрос с origin: ${origin}`;
+        console.warn(msg);
+        return callback(null, false);
     }
 }));
 
